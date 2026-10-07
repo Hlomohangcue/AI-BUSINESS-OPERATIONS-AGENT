@@ -1,0 +1,6 @@
+sku,product_name,stock_quantity,reorder_level,unit_cost
+SKU-001,Wireless Mouse,25,10,12.0
+SKU-002,Keyboard,8,10,25.0
+SKU-003,USB Cable,50,20,5.0
+SKU-004,Monitor,3,5,80.0
+SKU-005,Laptop Stand,30,10,20.0

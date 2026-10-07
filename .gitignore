@@ -1,0 +1,32 @@
+# Virtual environment
+.venv/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest
+.pytest_cache/
+
+# Streamlit
+.streamlit/
+
+# IDE
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Generated reports
+reports/*.json
+reports/*.csv
+reports/*.html
+
+# Logs
+*.log

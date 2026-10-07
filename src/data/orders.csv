@@ -1,0 +1,6 @@
+order_id,customer,sku,quantity,unit_price
+ORD-1001,Customer A,SKU-001,2,25.0
+ORD-1002,Customer B,SKU-002,1,45.0
+ORD-1003,Customer C,SKU-003,3,15.0
+ORD-1004,Customer D,SKU-004,1,100.0
+ORD-1005,Customer E,SKU-005,4,12.5

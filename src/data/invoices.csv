@@ -1,0 +1,6 @@
+invoice_id,order_id,invoice_amount,status
+INV-001,ORD-1001,50.0,Paid
+INV-002,ORD-1002,45.0,Paid
+INV-003,ORD-1003,45.0,Paid
+INV-004,ORD-1004,120.0,Paid
+INV-005,ORD-9999,30.0,Paid
