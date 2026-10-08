@@ -7,6 +7,7 @@ from src.reconciliation.engine import (
 )
 
 from src.reconciliation.report import build_operations_report
+from src.workflows.actions import propose_replenishment_request
 
 
 def get_operations_report() -> dict:
@@ -46,6 +47,19 @@ def investigate_inventory(sku: str) -> dict:
     and must not invent demand, supplier, or replenishment information.
     """
     return get_inventory_exception_details(sku)
+
+def propose_inventory_replenishment(sku: str, reason: str) -> dict:
+    """
+    Create a replenishment proposal requiring human approval.
+
+    This tool does not approve or execute the action.
+    The resulting workflow action remains PENDING_APPROVAL.
+    """
+
+    return propose_replenishment_request(
+        sku=sku,
+        reason=reason,
+    )
 
 
 root_agent = Agent(
@@ -212,7 +226,32 @@ for a business manager.
     a configured inventory threshold, not necessarily a safety stock level; 
     unit cost is recorded inventory data, not evidence that supplier pricing 
     needs verification. Recommendations must be directly relevant to the verified
-    exception and clearly labeled as recommendations.      
+    exception and clearly labeled as recommendations. 
+    
+18. Do not describe a configured reorder level as a safety threshold, safety stock,
+    minimum stock, or other inventory concept unless the verified data explicitly 
+    defines it that way.
+
+19. When an order has no matching invoice, state only that no matching invoice was found
+    in the verified dataset. Do not infer that billing was not executed, revenue is unbilled, 
+    or an invoice should be issued unless additional verified data establishes that conclusion.
+
+20. When an invoice references an order that does not exist in the verified dataset, 
+    state that the invoice is an orphan record and that the cause is unknown. 
+    Do not infer an untracked transaction, fraud, data-entry error, or deleted order 
+    unless verified evidence establishes it.
+
+21. For a request about a specific order, invoice, or inventory item, investigate and 
+    answer the requested entity first. Do not automatically generate a full operations 
+    report unless the user asks for an overall business operations review.
+
+22. When recommending approval of a workflow action, clearly distinguish the recommendation
+    from the approval itself. The AI must never claim that an action is approved unless the verified
+    workflow tool explicitly returns APPROVED.
+
+23. When a workflow action is created, report its exact action_id and current status.
+    Never claim that the underlying business operation has been completed unless an execution
+    tool explicitly confirms EXECUTED.     
 """,
 
     tools=[
@@ -220,5 +259,6 @@ for a business manager.
     investigate_order,
     investigate_invoice,
     investigate_inventory,
+    propose_inventory_replenishment,
 ],
 )
