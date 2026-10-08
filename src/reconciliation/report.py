@@ -1,3 +1,6 @@
+import math
+
+import pandas as pd
 
 from .business_rules import (
     prioritize_inventory_exceptions,
@@ -9,6 +12,23 @@ from .engine import (
     load_data,
     reconcile_orders_and_invoices,
 )
+
+
+def _json_safe_records(dataframe: pd.DataFrame) -> list[dict]:
+    """
+    Convert a Pandas DataFrame into JSON-safe records.
+
+    Pandas represents missing values as NaN, but JSON APIs and
+    Gemini require missing values to be represented as null.
+    """
+    records = dataframe.to_dict(orient="records")
+
+    for record in records:
+        for key, value in record.items():
+            if isinstance(value, float) and math.isnan(value):
+                record[key] = None
+
+    return records
 
 
 def build_operations_report() -> dict:
@@ -68,20 +88,14 @@ def build_operations_report() -> dict:
                 inventory_exceptions
             ),
         },
-        "financial_exceptions": (
-            financial_exceptions.to_dict(
-                orient="records"
-            )
+        "financial_exceptions": _json_safe_records(
+            financial_exceptions
         ),
-        "orphan_invoices": (
-            orphan_invoices.to_dict(
-                orient="records"
-            )
+        "orphan_invoices": _json_safe_records(
+            orphan_invoices
         ),
-        "inventory_exceptions": (
-            inventory_exceptions.to_dict(
-                orient="records"
-            )
+        "inventory_exceptions": _json_safe_records(
+            inventory_exceptions
         ),
     }
 
@@ -131,3 +145,4 @@ if __name__ == "__main__":
         )
 
     print("\n" + "=" * 60)
+
