@@ -9,6 +9,9 @@ from src.reconciliation.engine import (
 from src.reconciliation.report import build_operations_report
 from src.workflows.actions import propose_replenishment_request
 
+from src.agents.request_context import get_current_actor
+from src.workflows.authorization import AuthorizationError
+
 
 def get_operations_report() -> dict:
     """
@@ -48,18 +51,41 @@ def investigate_inventory(sku: str) -> dict:
     """
     return get_inventory_exception_details(sku)
 
+
 def propose_inventory_replenishment(sku: str, reason: str) -> dict:
     """
-    Create a replenishment proposal requiring human approval.
+    Create a replenishment proposal for the authenticated organization.
 
-    This tool does not approve or execute the action.
-    The resulting workflow action remains PENDING_APPROVAL.
+    Identity comes from trusted backend request context, never from
+    model-generated arguments. The proposal still requires approval.
     """
+    try:
+        actor = get_current_actor()
 
-    return propose_replenishment_request(
-        sku=sku,
-        reason=reason,
-    )
+        result = propose_replenishment_request(
+            sku=sku,
+            reason=reason,
+            actor=actor,
+        )
+
+        return {
+            "success": True,
+            "action": result,
+            "message": (
+                "Proposal created and awaiting human approval."
+            ),
+        }
+
+    except AuthorizationError:
+        return {
+            "success": False,
+            "error": "AUTHENTICATION_OR_AUTHORIZATION_REQUIRED",
+            "message": (
+                "This request requires an authenticated user with "
+                "permission to propose workflow actions."
+            ),
+        }
+
 
 
 root_agent = Agent(

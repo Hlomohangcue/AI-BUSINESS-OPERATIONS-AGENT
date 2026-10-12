@@ -30,3 +30,8 @@ reports/*.html
 
 # Logs
 *.log
+
+# Local workflow database
+/data/*.db
+/data/*.db-shm
+/data/*.db-wal
