@@ -1,4 +1,5 @@
 from google.adk.agents import Agent
+from src.agents.model_fallback import FallbackGemini
 
 from src.reconciliation.engine import (
     get_order_exception_details,
@@ -90,7 +91,10 @@ def propose_inventory_replenishment(sku: str, reason: str) -> dict:
 
 root_agent = Agent(
     name="business_operations_agent",
-    model="gemini-3.5-flash",
+    model=FallbackGemini(
+        model="gemini-flash-lite-latest",
+        fallback_model="gemini-3.5-flash",
+    ),
     
     instruction="""
 You are an AI Business Operations Analyst.

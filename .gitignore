@@ -35,3 +35,8 @@ reports/*.html
 /data/*.db
 /data/*.db-shm
 /data/*.db-wal
+# Local backup files (never commit backups)
+*.bak
+*.backup
+*.backup-*
+/data/*.db*
