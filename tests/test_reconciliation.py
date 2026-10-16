@@ -1,5 +1,6 @@
 import pandas as pd
 import json
+import pytest
 from src.reconciliation.report import build_operations_report
 
 from src.reconciliation.engine import (
@@ -211,3 +212,93 @@ def test_unknown_inventory_is_not_found():
 
     assert result["found"] is False
     assert result["sku"] == "SKU-999"
+
+
+@pytest.mark.parametrize(
+    (
+        "stock_quantity",
+        "expected_exception",
+        "expected_status",
+        "expected_priority",
+        "expected_action",
+    ),
+    [
+        (
+            0,
+            True,
+            "OUT_OF_STOCK",
+            "CRITICAL",
+            "Immediate replenishment required.",
+        ),
+        (
+            4,
+            True,
+            "LOW_STOCK",
+            "HIGH",
+            "Review stock levels and consider replenishment.",
+        ),
+        (
+            5,
+            True,
+            "LOW_STOCK",
+            "MEDIUM",
+            "Review stock levels and consider replenishment.",
+        ),
+        (6, False, "SUFFICIENT_STOCK", None, None),
+    ],
+)
+def test_inventory_threshold_is_consistent_across_report_and_lookup(
+    stock_quantity,
+    expected_exception,
+    expected_status,
+    expected_priority,
+    expected_action,
+):
+    orders = pd.DataFrame(
+        [{
+            "order_id": "SYN-ORDER-1",
+            "customer": "Synthetic customer",
+            "sku": "SYN-SKU-1",
+            "quantity": 1,
+            "unit_price": 10.0,
+        }]
+    )
+    invoices = pd.DataFrame(
+        [{
+            "invoice_id": "SYN-INVOICE-1",
+            "order_id": "SYN-ORDER-1",
+            "invoice_amount": 10.0,
+            "status": "Recorded",
+        }]
+    )
+    inventory = pd.DataFrame(
+        [{
+            "sku": "SYN-SKU-1",
+            "product_name": "Synthetic item",
+            "stock_quantity": stock_quantity,
+            "reorder_level": 5,
+            "unit_cost": 2.0,
+        }]
+    )
+
+    report = build_operations_report(orders, invoices, inventory)
+    investigation = get_inventory_exception_details(
+        "SYN-SKU-1",
+        inventory=inventory,
+    )
+
+    report_items = report["inventory_exceptions"]
+    assert any(item["sku"] == "SYN-SKU-1" for item in report_items) is (
+        expected_exception
+    )
+    assert investigation["inventory"]["status"] == expected_status
+    assert investigation["inventory"]["below_reorder_level"] is (
+        stock_quantity < 5
+    )
+
+    if expected_exception:
+        report_item = next(
+            item for item in report_items if item["sku"] == "SYN-SKU-1"
+        )
+        assert report_item["priority"] == expected_priority
+        assert report_item["recommended_action"] == expected_action

@@ -7,6 +7,10 @@ from src.reconciliation.engine import (
     get_inventory_exception_details,
 )
 
+from src.agents.business_data_context import (
+    get_current_business_data,
+)
+
 from src.reconciliation.report import build_operations_report
 from src.workflows.actions import propose_replenishment_request
 
@@ -15,42 +19,61 @@ from src.workflows.authorization import AuthorizationError
 
 
 def get_operations_report() -> dict:
-    """
-    Generate the verified business operations report.
+    """Generate the verified report for the current request."""
+    datasets = get_current_business_data()
 
-    This tool runs deterministic reconciliation and business rules.
-    The AI agent must use this report as the source of truth.
-    """
-    return build_operations_report()
+    if datasets is None:
+        return build_operations_report()
+
+    orders, invoices, inventory = datasets
+    return build_operations_report(
+        orders=orders,
+        invoices=invoices,
+        inventory=inventory,
+    )
 
 
 def investigate_order(order_id: str) -> dict:
-    """
-    Investigate a specific order using verified deterministic data.
+    """Investigate an order using verified request-scoped data."""
+    datasets = get_current_business_data()
 
-    The AI agent should explain the returned information without
-    inventing facts that are not present in the result.
-    """
-    return get_order_exception_details(order_id)
+    if datasets is None:
+        return get_order_exception_details(order_id)
+
+    orders, invoices, _ = datasets
+    return get_order_exception_details(
+        order_id,
+        orders=orders,
+        invoices=invoices,
+    )
 
 def investigate_invoice(invoice_id: str) -> dict:
-    """
-    Investigate a specific invoice using verified deterministic data.
+    """Investigate an invoice using verified request-scoped data."""
+    datasets = get_current_business_data()
 
-    The AI agent must treat the returned data as the source of truth
-    and must not invent payment or transaction information.
-    """
-    return get_invoice_exception_details(invoice_id)
+    if datasets is None:
+        return get_invoice_exception_details(invoice_id)
+
+    orders, invoices, _ = datasets
+    return get_invoice_exception_details(
+        invoice_id,
+        orders=orders,
+        invoices=invoices,
+    )
 
 
 def investigate_inventory(sku: str) -> dict:
-    """
-    Investigate a specific inventory item using verified deterministic data.
+    """Investigate inventory using verified request-scoped data."""
+    datasets = get_current_business_data()
 
-    The AI agent must distinguish low stock from confirmed stockout
-    and must not invent demand, supplier, or replenishment information.
-    """
-    return get_inventory_exception_details(sku)
+    if datasets is None:
+        return get_inventory_exception_details(sku)
+
+    _, _, inventory = datasets
+    return get_inventory_exception_details(
+        sku,
+        inventory=inventory,
+    )
 
 
 def propose_inventory_replenishment(sku: str, reason: str) -> dict:

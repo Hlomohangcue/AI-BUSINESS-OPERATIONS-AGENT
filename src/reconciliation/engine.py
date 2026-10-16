@@ -89,7 +89,11 @@ def find_low_stock_items(
 
     return low_stock
 
-def get_order_exception_details(order_id: str) -> dict:
+def get_order_exception_details(
+    order_id: str,
+    orders: pd.DataFrame | None = None,
+    invoices: pd.DataFrame | None = None,
+) -> dict:
     """
     Retrieve verified reconciliation details for a specific order.
 
@@ -97,7 +101,10 @@ def get_order_exception_details(order_id: str) -> dict:
     The AI agent is responsible only for explaining the returned data.
     """
 
-    orders, invoices, _ = load_data()
+    if orders is None and invoices is None:
+        orders, invoices, _ = load_data()
+    elif orders is None or invoices is None:
+        raise ValueError("Orders and invoices must be supplied together.")
 
     reconciliation = reconcile_orders_and_invoices(
         orders,
@@ -154,7 +161,11 @@ def get_order_exception_details(order_id: str) -> dict:
         },
     }
     
-def get_invoice_exception_details(invoice_id: str) -> dict:
+def get_invoice_exception_details(
+    invoice_id: str,
+    orders: pd.DataFrame | None = None,
+    invoices: pd.DataFrame | None = None,
+) -> dict:
     """
     Investigate a specific invoice using verified deterministic data.
 
@@ -162,7 +173,10 @@ def get_invoice_exception_details(invoice_id: str) -> dict:
     to a verified order.
     """
 
-    orders, invoices, _ = load_data()
+    if orders is None and invoices is None:
+        orders, invoices, _ = load_data()
+    elif orders is None or invoices is None:
+        raise ValueError("Orders and invoices must be supplied together.")
 
     invoice_matches = invoices[invoices["invoice_id"] == invoice_id]
 
@@ -193,12 +207,16 @@ def get_invoice_exception_details(invoice_id: str) -> dict:
         },
     }
     
-def get_inventory_exception_details(sku: str) -> dict:
+def get_inventory_exception_details(
+    sku: str,
+    inventory: pd.DataFrame | None = None,
+) -> dict:
     """
     Investigate a specific inventory item using verified deterministic data.
     """
 
-    _, _, inventory = load_data()
+    if inventory is None:
+        _, _, inventory = load_data()
 
     inventory_matches = inventory[inventory["sku"] == sku]
 
@@ -216,7 +234,7 @@ def get_inventory_exception_details(sku: str) -> dict:
 
     if stock_quantity == 0:
         inventory_status = "OUT_OF_STOCK"
-    elif stock_quantity < reorder_level:
+    elif stock_quantity <= reorder_level:
         inventory_status = "LOW_STOCK"
     else:
         inventory_status = "SUFFICIENT_STOCK"

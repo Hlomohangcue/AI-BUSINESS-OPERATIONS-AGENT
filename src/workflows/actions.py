@@ -317,12 +317,63 @@ def approve_workflow_action(
     action_id: str,
     actor: Actor,
 ) -> dict:
-    """Approve a pending action belonging to the actor's organization."""
+    """Approve a pending action proposed by a different verified actor."""
     require_permission(actor, Permission.APPROVE_ACTION)
 
     approved_at = datetime.now(timezone.utc).isoformat()
 
     with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM workflow_actions
+            WHERE action_id = ?
+              AND organization_id = ?
+            """,
+            (action_id, actor.organization_id),
+        ).fetchone()
+
+        if row is None:
+            return {
+                "found": False,
+                "action_id": action_id,
+                "message": f"Workflow action {action_id} not found.",
+            }
+
+        result = dict(row)
+        result["found"] = True
+
+        if row["status"] != "PENDING_APPROVAL":
+            result["message"] = "Only pending actions can be approved."
+            return result
+
+        provenance = connection.execute(
+            """
+            SELECT COUNT(*) AS event_count, MIN(actor) AS proposer
+            FROM workflow_action_events
+            WHERE action_id = ?
+              AND organization_id = ?
+              AND event_type = 'ACTION_CREATED'
+            """,
+            (action_id, actor.organization_id),
+        ).fetchone()
+
+        if (
+            provenance["event_count"] != 1
+            or not isinstance(provenance["proposer"], str)
+            or not provenance["proposer"].strip()
+        ):
+            result["message"] = (
+                "The proposer cannot be verified for this action."
+            )
+            return result
+
+        if provenance["proposer"] == actor.user_id:
+            result["message"] = (
+                "The proposer cannot approve their own action."
+            )
+            return result
+
         cursor = connection.execute(
             """
             UPDATE workflow_actions
@@ -363,7 +414,7 @@ def approve_workflow_action(
 
             return dict(row)
 
-        # Do not reveal whether an action exists in another organization.
+        # A concurrent transition may have changed the action after the read.
         row = connection.execute(
             """
             SELECT *
@@ -374,12 +425,12 @@ def approve_workflow_action(
             (action_id, actor.organization_id),
         ).fetchone()
 
-    if row is None:
-        return {
-            "found": False,
-            "action_id": action_id,
-            "message": f"Workflow action {action_id} not found.",
-        }
+        if row is None:
+            return {
+                "found": False,
+                "action_id": action_id,
+                "message": f"Workflow action {action_id} not found.",
+            }
 
     result = dict(row)
     result["found"] = True

@@ -1,6 +1,7 @@
 ﻿import pytest
 
 from src.workflows.actions import (
+    _connect,
     approve_workflow_action,
     create_replenishment_request,
     execute_workflow_action,
@@ -20,6 +21,12 @@ APPROVER = Actor(
     user_id="approver-1",
     organization_id="test-org",
     role=Role.APPROVER,
+)
+
+ADMINISTRATOR = Actor(
+    user_id="administrator-1",
+    organization_id="test-org",
+    role=Role.ADMINISTRATOR,
 )
 
 OTHER_TENANT_ADMIN = Actor(
@@ -57,6 +64,48 @@ def test_pending_action_can_be_approved():
     assert approved["status"] == "APPROVED"
     assert approved["approved_by"] == APPROVER.user_id
     assert approved["approved_at"]
+
+
+def test_proposer_cannot_approve_own_action():
+    action = create_replenishment_request(
+        "SKU-004",
+        "Separation of duties test",
+        ADMINISTRATOR,
+    )
+
+    result = approve_workflow_action(action["action_id"], ADMINISTRATOR)
+    events = get_workflow_action_events(action["action_id"], ADMINISTRATOR)
+
+    assert result["found"] is True
+    assert result["status"] == "PENDING_APPROVAL"
+    assert result["message"] == "The proposer cannot approve their own action."
+    assert [event["event_type"] for event in events] == ["ACTION_CREATED"]
+
+
+def test_action_without_creation_provenance_cannot_be_approved():
+    action = create_replenishment_request(
+        "SKU-004",
+        "Legacy action provenance test",
+        OPERATOR,
+    )
+    with _connect() as connection:
+        connection.execute(
+            """
+            DELETE FROM workflow_action_events
+            WHERE action_id = ?
+              AND organization_id = ?
+              AND event_type = 'ACTION_CREATED'
+            """,
+            (action["action_id"], OPERATOR.organization_id),
+        )
+
+    result = approve_workflow_action(action["action_id"], APPROVER)
+
+    assert result["found"] is True
+    assert result["status"] == "PENDING_APPROVAL"
+    assert result["message"] == (
+        "The proposer cannot be verified for this action."
+    )
 
 
 def test_unapproved_action_cannot_execute():

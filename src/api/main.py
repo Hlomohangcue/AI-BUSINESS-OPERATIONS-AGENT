@@ -15,6 +15,19 @@ import json
 import os
 from typing import Annotated, Any
 
+import io
+
+import pandas as pd
+from fastapi import Request
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile
+
+from src.agents.business_data_context import (
+    set_current_business_data,
+    reset_current_business_data,
+)
+from src.reconciliation.uploads import validate_business_csv
+
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -61,6 +74,138 @@ class ReplenishmentRequest(BaseModel):
 
 class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
+
+
+MAX_CSV_UPLOAD_BYTES = 5 * 1024 * 1024
+
+
+async def _read_csv_upload(upload: UploadFile, field_name: str) -> bytes:
+    """Read at most one byte beyond the configured CSV upload limit."""
+    if (
+        upload.size is not None
+        and upload.size > MAX_CSV_UPLOAD_BYTES
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"{field_name} exceeds the 5 MiB limit.",
+        )
+
+    raw = await upload.read(MAX_CSV_UPLOAD_BYTES + 1)
+
+    if len(raw) > MAX_CSV_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"{field_name} exceeds the 5 MiB limit.",
+        )
+
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} is empty.",
+        )
+
+    return raw
+
+
+async def _parse_multipart_chat_request(
+    request: Request,
+) -> tuple[str, tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame] | None]:
+    """Parse and close a multipart chat request, including uploaded CSVs."""
+    try:
+        form = await request.form()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The multipart request could not be read.",
+        ) from None
+
+    try:
+        message_value = form.get("message")
+        message = (
+            message_value.strip()
+            if isinstance(message_value, str)
+            else ""
+        )
+
+        file_fields = {
+            "orders_file": form.get("orders_file"),
+            "invoices_file": form.get("invoices_file"),
+            "inventory_file": form.get("inventory_file"),
+        }
+        supplied = {
+            name: value
+            for name, value in file_fields.items()
+            if value is not None
+        }
+
+        if supplied and len(supplied) != 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Upload orders, invoices, and inventory CSV files "
+                    "together, or upload none of them."
+                ),
+            )
+
+        datasets = None
+
+        if supplied:
+            parsed_datasets = {}
+            dataset_names = {
+                "orders_file": "orders",
+                "invoices_file": "invoices",
+                "inventory_file": "inventory",
+            }
+
+            for field_name, dataset_name in dataset_names.items():
+                upload = file_fields[field_name]
+
+                if not isinstance(upload, UploadFile):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"{field_name} must be a CSV file.",
+                    )
+
+                if (
+                    upload.filename
+                    and not upload.filename.lower().endswith(".csv")
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"{field_name} must have a .csv filename.",
+                    )
+
+                raw = await _read_csv_upload(upload, field_name)
+
+                try:
+                    dataframe = pd.read_csv(io.BytesIO(raw))
+                    parsed_datasets[dataset_name] = validate_business_csv(
+                        dataframe,
+                        dataset_name,
+                    )
+                except (
+                    ValueError,
+                    UnicodeDecodeError,
+                    pd.errors.ParserError,
+                    pd.errors.EmptyDataError,
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"{field_name} could not be parsed or failed "
+                            "CSV validation."
+                        ),
+                    ) from None
+
+            datasets = (
+                parsed_datasets["orders"],
+                parsed_datasets["invoices"],
+                parsed_datasets["inventory"],
+            )
+
+        return message, datasets
+    finally:
+        await form.close()
 
 
 # Local-development session storage. Conversations are lost on restart.
@@ -291,19 +436,49 @@ def execute_action(
 
 @app.post("/agent/chat")
 async def agent_chat(
-    request: AgentChatRequest,
+    request: Request,
     actor: AuthenticatedActor,
 ) -> dict:
-    """Run the business operations agent as an authenticated user."""
+    """Run the agent with optional request-scoped CSV datasets."""
 
-    message = request.message.strip()
+    datasets = None
+    content_type = request.headers.get("content-type", "").lower()
+
+    # Preserve JSON requests while also accepting multipart CSV uploads.
+    if content_type.startswith("application/json"):
+        try:
+            payload = await request.json()
+            chat_request = AgentChatRequest.model_validate(payload)
+        except (json.JSONDecodeError, ValidationError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Provide a valid JSON object containing a message.",
+            ) from None
+
+        message = chat_request.message.strip()
+
+    elif content_type.startswith("multipart/form-data"):
+        message, datasets = await _parse_multipart_chat_request(request)
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Use application/json or multipart/form-data.",
+        )
+
     if not message:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Message cannot be empty.",
         )
 
-    # Derive both ADK identifiers from trusted server-side identity.
+    if len(message) > 10000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Message must not exceed 10000 characters.",
+        )
+
+    # Derive ADK identifiers from the authenticated server-side identity.
     identity = f"{actor.organization_id}:{actor.user_id}"
     session_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     adk_user_id = session_key
@@ -330,9 +505,13 @@ async def agent_chat(
 
         response_text = []
 
-        # The trusted actor is available to tools during this invocation.
-        token = set_current_actor(actor)
+        actor_token = set_current_actor(actor)
+        dataset_token = None
+
         try:
+            if datasets is not None:
+                dataset_token = set_current_business_data(*datasets)
+
             async for event in agent_runner.run_async(
                 user_id=adk_user_id,
                 session_id=adk_session_id,
@@ -349,7 +528,10 @@ async def agent_chat(
                         if part.text
                     )
         finally:
-            reset_current_actor(token)
+            if dataset_token is not None:
+                reset_current_business_data(dataset_token)
+
+            reset_current_actor(actor_token)
 
         if not response_text:
             raise HTTPException(

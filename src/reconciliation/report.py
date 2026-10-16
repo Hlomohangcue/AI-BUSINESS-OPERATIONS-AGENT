@@ -31,13 +31,29 @@ def _json_safe_records(dataframe: pd.DataFrame) -> list[dict]:
     return records
 
 
-def build_operations_report() -> dict:
+def build_operations_report(
+    orders: pd.DataFrame | None = None,
+    invoices: pd.DataFrame | None = None,
+    inventory: pd.DataFrame | None = None,
+) -> dict:
     """
-    Build a structured business operations report
-    from orders, invoices, and inventory data.
+    Build a structured report from supplied data or the demo CSV files.
+
+    Supply all three DataFrames for uploaded data, or none for demo data.
     """
 
-    orders, invoices, inventory = load_data()
+    supplied = (orders is not None, invoices is not None, inventory is not None)
+    if any(supplied) and not all(supplied):
+        raise ValueError(
+            "Orders, invoices, and inventory must be supplied together."
+        )
+
+    if not any(supplied):
+        orders, invoices, inventory = load_data()
+
+    assert orders is not None
+    assert invoices is not None
+    assert inventory is not None
 
     reconciliation = reconcile_orders_and_invoices(
         orders,
